@@ -25,6 +25,12 @@ static int test_pass = 0;
 // 浮点数用 == 比较有问题
 #define EXPECT_EQ_DOUBLE(expect, actual) EXPECT_EQ_BASE((expect) == (actual), expect, actual, "%.17g")
 
+#define EXPECT_EQ_STRING(expect, actual, alength) EXPECT_EQ_BASE(sizeof(expect) - 1 == (alength) && memcmp(expect, actual, alength) == 0, expect, actual, "%s")
+
+#define EXPECT_TRUE(actual) EXPECT_EQ_BASE((actual) != 0, "true", "false", "%s")
+
+#define EXPECT_FALSE(actual) EXPECT_EQ_BASE((actual) == 0, "false", "true", "%s")
+
 static void test_parse_null()
 {
   tiny_value v;
@@ -92,6 +98,27 @@ al */
   TEST_NUMBER(-1.7976931348623157e+308, "-1.7976931348623157e+308");
 }
 
+#define TEST_STRING(expect, json)                                              \
+  do                                                                           \
+  {                                                                            \
+    tiny_value v;                                                              \
+    tiny_init(&v);                                                             \
+    EXPECT_EQ_INT(TINY_PARSE_OK, tiny_parse(&v, json));                        \
+    EXPECT_EQ_INT(TINY_STRING, tiny_get_type(&v));                             \
+    EXPECT_EQ_STRING(expect, tiny_get_string(&v), tiny_get_string_length(&v)); \
+    tiny_free(&v);                                                             \
+  } while (0)
+
+static void test_parse_string()
+{
+  TEST_STRING("", "\"\"");
+  TEST_STRING("Hello", "\"Hello\"");
+#if 0
+    TEST_STRING("Hello\nWorld", "\"Hello\\nWorld\"");
+    TEST_STRING("\" \\ / \b \f \n \r \t", "\"\\\" \\\\ \\/ \\b \\f \\n \\r \\t\"");
+#endif
+}
+
 #define TEST_ERROR(error, json)                  \
   do                                             \
   {                                              \
@@ -136,22 +163,85 @@ static void test_parse_root_not_singular()
 
 static void test_parse_number_too_big()
 {
-#if 0
+#if 1
   TEST_ERROR(TINY_PARSE_NUMBER_TOO_BIG, "1e309");
   TEST_ERROR(TINY_PARSE_NUMBER_TOO_BIG, "-1e309");
 #endif
 }
 
+static void test_parse_missing_quotation_mark()
+{
+  TEST_ERROR(TINY_PARSE_MISS_QUOTATION_MARK, "\"");
+  TEST_ERROR(TINY_PARSE_MISS_QUOTATION_MARK, "\"abc");
+}
+
+static void test_parse_invalid_string_escape()
+{
+#if 0
+    TEST_ERROR(tiny_PARSE_INVALID_STRING_ESCAPE, "\"\\v\"");
+    TEST_ERROR(tiny_PARSE_INVALID_STRING_ESCAPE, "\"\\'\"");
+    TEST_ERROR(tiny_PARSE_INVALID_STRING_ESCAPE, "\"\\0\"");
+    TEST_ERROR(tiny_PARSE_INVALID_STRING_ESCAPE, "\"\\x12\"");
+#endif
+}
+
+static void test_parse_invalid_string_char()
+{
+#if 0
+    TEST_ERROR(tiny_PARSE_INVALID_STRING_CHAR, "\"\x01\"");
+    TEST_ERROR(tiny_PARSE_INVALID_STRING_CHAR, "\"\x1F\"");
+#endif
+}
+static void test_access_null()
+{
+  tiny_value v;
+  tiny_init(&v);
+  tiny_set_string(&v, "a", 1);
+  tiny_set_null(&v);
+  EXPECT_EQ_INT(TINY_NULL, tiny_get_type(&v));
+  tiny_free(&v);
+}
+
+static void test_access_boolean()
+{
+  /* \TODO */
+  /* Use EXPECT_TRUE() and EXPECT_FALSE() */
+}
+
+static void test_access_number()
+{
+  /* \TODO */
+}
+
+static void test_access_string()
+{
+  tiny_value v;
+  tiny_init(&v);
+  tiny_set_string(&v, "", 0);
+  EXPECT_EQ_STRING("", tiny_get_string(&v), tiny_get_string_length(&v));
+  tiny_set_string(&v, "Hello", 5);
+  EXPECT_EQ_STRING("Hello", tiny_get_string(&v), tiny_get_string_length(&v));
+  tiny_free(&v);
+}
 static void test_parse()
 {
   test_parse_true();
   test_parse_false();
   test_parse_null();
   test_parse_number();
+  test_parse_string();
   test_parse_number_too_big();
   test_parse_expect_value();
   test_parse_invalid_value();
   test_parse_root_not_singular();
+  test_parse_missing_quotation_mark();
+  test_parse_invalid_string_escape();
+  test_parse_invalid_string_char();
+
+  test_access_null();
+  test_access_boolean();
+  test_access_number();
+  test_access_string();
 }
 
 int main()
