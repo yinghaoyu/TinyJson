@@ -1,0 +1,10 @@
+PointerAlignment: Left
+BreakBeforeBraces: Allman
+IndentWidth: 2
+TabWidth: 2
+BasedOnStyle: Chromium
+ColumnLimit: 160
+DerivePointerAlignment: false
+IndentCaseLabels: false
+PointerAlignment: Right
+SpaceAfterCStyleCast: true
