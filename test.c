@@ -22,6 +22,9 @@ static int test_pass = 0;
 
 #define EXPECT_EQ_INT(expect, actual) EXPECT_EQ_BASE((expect) == (actual), expect, actual, "%d")
 
+// 浮点数用 == 比较有问题
+#define EXPECT_EQ_DOUBLE(expect, actual) EXPECT_EQ_BASE((expect) == (actual), expect, actual, "%.17g")
+
 static void test_parse_null()
 {
   tiny_value v;
@@ -46,37 +49,86 @@ static void test_parse_false()
   EXPECT_EQ_INT(TINY_FALSE, tiny_get_type(&v));
 }
 
+#define TEST_NUMBER(expect, json)                       \
+  do                                                    \
+  {                                                     \
+    tiny_value v;                                       \
+    EXPECT_EQ_INT(TINY_PARSE_OK, tiny_parse(&v, json)); \
+    EXPECT_EQ_INT(TINY_NUMBER, tiny_get_type(&v));      \
+    EXPECT_EQ_DOUBLE(expect, tiny_get_number(&v));      \
+  } while (0)
+
+static void test_parse_number()
+{
+  TEST_NUMBER(0.0, "0");
+  TEST_NUMBER(0.0, "-0");
+  TEST_NUMBER(0.0, "-0.0");
+  TEST_NUMBER(1.0, "1");
+  TEST_NUMBER(-1.0, "-1");
+  TEST_NUMBER(1.5, "1.5");
+  TEST_NUMBER(-1.5, "-1.5");
+  TEST_NUMBER(3.1416, "3.1416");
+  TEST_NUMBER(1E10, "1E10");
+  TEST_NUMBER(1e10, "1e10");
+  TEST_NUMBER(1E+10, "1E+10");
+  TEST_NUMBER(1E-10, "1E-10");
+  TEST_NUMBER(-1E10, "-1E10");
+  TEST_NUMBER(-1e10, "-1e10");
+  TEST_NUMBER(-1E+10, "-1E+10");
+  TEST_NUMBER(-1E-10, "-1E-10");
+  TEST_NUMBER(1.234E+10, "1.234E+10");
+  TEST_NUMBER(1.234E-10, "1.234E-10");
+  TEST_NUMBER(0.0, "1e-10000"); /* must underflow */
+}
+
+#define TEST_ERROR(error, json)                  \
+  do                                             \
+  {                                              \
+    tiny_value v;                                \
+    v.type = TINY_FALSE;                         \
+    EXPECT_EQ_INT(error, tiny_parse(&v, json));  \
+    EXPECT_EQ_INT(TINY_NULL, tiny_get_type(&v)); \
+  } while (0)
+
 static void test_parse_expect_value()
 {
-  tiny_value v;
-
-  v.type = TINY_FALSE;
-  EXPECT_EQ_INT(TINY_PARSE_EXPECT_VALUE, tiny_parse(&v, ""));
-  EXPECT_EQ_INT(TINY_NULL, tiny_get_type(&v));
-
-  v.type = TINY_FALSE;
-  EXPECT_EQ_INT(TINY_PARSE_EXPECT_VALUE, tiny_parse(&v, " "));
-  EXPECT_EQ_INT(TINY_NULL, tiny_get_type(&v));
+  TEST_ERROR(TINY_PARSE_EXPECT_VALUE, "");
+  TEST_ERROR(TINY_PARSE_EXPECT_VALUE, " ");
 }
 
 static void test_parse_invalid_value()
 {
-  tiny_value v;
-  v.type = TINY_FALSE;
-  EXPECT_EQ_INT(TINY_PARSE_INVALID_VALUE, tiny_parse(&v, "nul"));
-  EXPECT_EQ_INT(TINY_NULL, tiny_get_type(&v));
-
-  v.type = TINY_FALSE;
-  EXPECT_EQ_INT(TINY_PARSE_INVALID_VALUE, tiny_parse(&v, "?"));
-  EXPECT_EQ_INT(TINY_NULL, tiny_get_type(&v));
+  TEST_ERROR(TINY_PARSE_INVALID_VALUE, "nul");
+  TEST_ERROR(TINY_PARSE_INVALID_VALUE, "?");
+#if 0
+  TEST_ERROR(TINY_PARSE_INVALID_VALUE, "+0");
+  TEST_ERROR(TINY_PARSE_INVALID_VALUE, "+1");
+  TEST_ERROR(TINY_PARSE_INVALID_VALUE, ".123"); /* at least one digit before '.' */
+  TEST_ERROR(TINY_PARSE_INVALID_VALUE, "1.");   /* at least one digit after '.' */
+  TEST_ERROR(TINY_PARSE_INVALID_VALUE, "INF");
+  TEST_ERROR(TINY_PARSE_INVALID_VALUE, "inf");
+  TEST_ERROR(TINY_PARSE_INVALID_VALUE, "NAN");
+  TEST_ERROR(TINY_PARSE_INVALID_VALUE, "nan");
+#endif
 }
 
 static void test_parse_root_not_singular()
 {
-  tiny_value v;
-  v.type = TINY_FALSE;
-  EXPECT_EQ_INT(TINY_PARSE_ROOT_NOT_SINGULAR, tiny_parse(&v, "null x"));
-  EXPECT_EQ_INT(TINY_NULL, tiny_get_type(&v));
+  TEST_ERROR(TINY_PARSE_ROOT_NOT_SINGULAR, "null x");
+#if 0
+    /* invalid number */
+    TEST_ERROR(LEPT_PARSE_ROOT_NOT_SINGULAR, "0123"); /* after zero should be '.' , 'E' , 'e' or nothing */
+    TEST_ERROR(LEPT_PARSE_ROOT_NOT_SINGULAR, "0x0");
+    TEST_ERROR(LEPT_PARSE_ROOT_NOT_SINGULAR, "0x123");
+#endif
+}
+
+static void test_parse_number_too_big()
+{
+#if 0
+  TEST_ERROR(TINY_PARSE_NUMBER_TOO_BIG, "1e309");
+  TEST_ERROR(TINY_PARSE_NUMBER_TOO_BIG, "-1e309");
+#endif
 }
 
 static void test_parse()
@@ -84,6 +136,8 @@ static void test_parse()
   test_parse_true();
   test_parse_false();
   test_parse_null();
+  test_parse_number();
+  test_parse_number_too_big();
   test_parse_expect_value();
   test_parse_invalid_value();
   test_parse_root_not_singular();

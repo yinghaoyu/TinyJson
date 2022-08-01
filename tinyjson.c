@@ -52,6 +52,21 @@ static int tiny_parse_null(tiny_context *c, tiny_value *v)
   return TINY_PARSE_OK;
 }
 
+static int tiny_parse_number(tiny_context *c, tiny_value *v)
+{
+  char *end;
+  /* \TODO validate number */
+  // string to double
+  // return value: number
+  // end: first charatcor cannot convert
+  v->n = strtod(c->json, &end);
+  if (c->json == end)  // cannot convert
+    return TINY_PARSE_INVALID_VALUE;
+  c->json = end;
+  v->type = TINY_NUMBER;
+  return TINY_PARSE_OK;
+}
+
 static int tiny_parse_value(tiny_context *c, tiny_value *v)
 {
   switch (*c->json)
@@ -65,7 +80,7 @@ static int tiny_parse_value(tiny_context *c, tiny_value *v)
   case '\0':
     return TINY_PARSE_EXPECT_VALUE;
   default:
-    return TINY_PARSE_INVALID_VALUE;
+    return tiny_parse_number(c, v);
   }
 }
 
@@ -92,4 +107,10 @@ tiny_type tiny_get_type(const tiny_value *v)
 {
   assert(v != NULL);
   return v->type;
+}
+
+double tiny_get_number(const tiny_value *v)
+{
+  assert(v != NULL && v->type == TINY_NUMBER);
+  return v->n;
 }
