@@ -163,11 +163,52 @@ static int tiny_parse_string(tiny_context *c, tiny_value *v)
       tiny_set_string(v, (const char *) tiny_context_pop(c, len), len);
       c->json = p;
       return TINY_PARSE_OK;
+    case '\\':
+      // 转义字符
+      switch (*p++)
+      {
+      case '\"':
+        PUTC(c, '\"');
+        break;
+      case '\\':
+        PUTC(c, '\\');
+        break;
+      case '/':
+        PUTC(c, '/');
+        break;
+      case 'b':
+        PUTC(c, '\b');
+        break;
+      case 'f':
+        PUTC(c, '\f');
+        break;
+      case 'n':
+        PUTC(c, '\n');
+        break;
+      case 'r':
+        PUTC(c, '\r');
+        break;
+      case 't':
+        PUTC(c, '\t');
+        break;
+      default:
+        c->top = head;
+        return TINY_PARSE_INVALID_STRING_ESCAPE;
+      }
+      break;
     case '\0':
       // 不匹配""
       c->top = head;  // 重置栈顶
       return TINY_PARSE_MISS_QUOTATION_MARK;
     default:
+      // char 带不带符号，是实现定义的。
+      // 如果编译器定义 char 为带符号的话，(unsigned char)ch >= 0x80 的字符，都会变成负数，并产生 LEPT_PARSE_INVALID_STRING_CHAR 错误。
+      // 我们现时还没有测试 ASCII 以外的字符，所以有没有转型至不带符号都不影响，但开始处理 Unicode 的时候就要考虑了
+      if ((unsigned char) ch < 0x20)
+      {
+        c->top = head;
+        return TINY_PARSE_INVALID_STRING_CHAR;
+      }
       PUTC(c, ch);  // 把字符进栈
     }
   }
@@ -183,21 +224,6 @@ void tiny_free(tiny_value *v)
   v->type = TINY_NULL;
 }
 
-int tiny_get_boolean(const tiny_value *v)
-{
-  /* \TODO */
-  return 0;
-}
-
-void tiny_set_boolean(tiny_value *v, int b)
-{
-  /* \TODO */
-}
-
-void tiny_set_number(tiny_value *v, double n)
-{
-  /* \TODO */
-}
 const char *tiny_get_string(const tiny_value *v)
 {
   assert(v != NULL && v->type == TINY_STRING);
@@ -274,4 +300,25 @@ double tiny_get_number(const tiny_value *v)
 {
   assert(v != NULL && v->type == TINY_NUMBER);
   return v->u.n;
+}
+
+int tiny_get_boolean(const tiny_value *v)
+{
+  assert(v != NULL && (v->type == TINY_TRUE || v->type == TINY_FALSE));
+  return v->type == TINY_TRUE;
+}
+
+void tiny_set_boolean(tiny_value *v, int b)
+{
+  // valgrind --leak-check=full  ./leptjson_test
+  // catch no free
+  // tiny_free(v);
+  v->type = b ? TINY_TRUE : TINY_FALSE;
+}
+
+void tiny_set_number(tiny_value *v, double n)
+{
+  tiny_free(v);
+  v->u.n = n;
+  v->type = TINY_NUMBER;
 }
