@@ -91,7 +91,7 @@ static int tiny_parse_number(tiny_context *c, tiny_value *v)
   {
     p++;
   }
-  if (*p == '0')  // 只有单个0
+  if (*p == '0')  // 只有单个0，不能有前导0，比如0123
   {
     p++;
   }
