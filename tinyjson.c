@@ -312,7 +312,7 @@ void tiny_set_boolean(tiny_value *v, int b)
 {
   // valgrind --leak-check=full  ./leptjson_test
   // catch no free
-  // tiny_free(v);
+  tiny_free(v);
   v->type = b ? TINY_TRUE : TINY_FALSE;
 }
 
