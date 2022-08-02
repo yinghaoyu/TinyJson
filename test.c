@@ -176,6 +176,67 @@ static void test_parse_array()
   tiny_free(&v);
 }
 
+static void test_parse_object()
+{
+  tiny_value v;
+  size_t i;
+
+  tiny_init(&v);
+  EXPECT_EQ_INT(TINY_PARSE_OK, tiny_parse(&v, " { } "));
+  EXPECT_EQ_INT(TINY_OBJECT, tiny_get_type(&v));
+  EXPECT_EQ_SIZE_T(0, tiny_get_object_size(&v));
+  tiny_free(&v);
+
+  tiny_init(&v);
+  EXPECT_EQ_INT(TINY_PARSE_OK, tiny_parse(&v,
+                                          " { "
+                                          "\"n\" : null , "
+                                          "\"f\" : false , "
+                                          "\"t\" : true , "
+                                          "\"i\" : 123 , "
+                                          "\"s\" : \"abc\", "
+                                          "\"a\" : [ 1, 2, 3 ],"
+                                          "\"o\" : { \"1\" : 1, \"2\" : 2, \"3\" : 3 }"
+                                          " } "));
+  EXPECT_EQ_INT(TINY_OBJECT, tiny_get_type(&v));
+  EXPECT_EQ_SIZE_T(7, tiny_get_object_size(&v));
+  EXPECT_EQ_STRING("n", tiny_get_object_key(&v, 0), tiny_get_object_key_length(&v, 0));
+  EXPECT_EQ_INT(TINY_NULL, tiny_get_type(tiny_get_object_value(&v, 0)));
+  EXPECT_EQ_STRING("f", tiny_get_object_key(&v, 1), tiny_get_object_key_length(&v, 1));
+  EXPECT_EQ_INT(TINY_FALSE, tiny_get_type(tiny_get_object_value(&v, 1)));
+  EXPECT_EQ_STRING("t", tiny_get_object_key(&v, 2), tiny_get_object_key_length(&v, 2));
+  EXPECT_EQ_INT(TINY_TRUE, tiny_get_type(tiny_get_object_value(&v, 2)));
+  EXPECT_EQ_STRING("i", tiny_get_object_key(&v, 3), tiny_get_object_key_length(&v, 3));
+  EXPECT_EQ_INT(TINY_NUMBER, tiny_get_type(tiny_get_object_value(&v, 3)));
+  EXPECT_EQ_DOUBLE(123.0, tiny_get_number(tiny_get_object_value(&v, 3)));
+  EXPECT_EQ_STRING("s", tiny_get_object_key(&v, 4), tiny_get_object_key_length(&v, 4));
+  EXPECT_EQ_INT(TINY_STRING, tiny_get_type(tiny_get_object_value(&v, 4)));
+  EXPECT_EQ_STRING("abc", tiny_get_string(tiny_get_object_value(&v, 4)), tiny_get_string_length(tiny_get_object_value(&v, 4)));
+  EXPECT_EQ_STRING("a", tiny_get_object_key(&v, 5), tiny_get_object_key_length(&v, 5));
+  EXPECT_EQ_INT(TINY_ARRAY, tiny_get_type(tiny_get_object_value(&v, 5)));
+  EXPECT_EQ_SIZE_T(3, tiny_get_array_size(tiny_get_object_value(&v, 5)));
+  for (i = 0; i < 3; i++)
+  {
+    tiny_value *e = tiny_get_array_element(tiny_get_object_value(&v, 5), i);
+    EXPECT_EQ_INT(TINY_NUMBER, tiny_get_type(e));
+    EXPECT_EQ_DOUBLE(i + 1.0, tiny_get_number(e));
+  }
+  EXPECT_EQ_STRING("o", tiny_get_object_key(&v, 6), tiny_get_object_key_length(&v, 6));
+  {
+    tiny_value *o = tiny_get_object_value(&v, 6);
+    EXPECT_EQ_INT(TINY_OBJECT, tiny_get_type(o));
+    for (i = 0; i < 3; i++)
+    {
+      tiny_value *ov = tiny_get_object_value(o, i);
+      EXPECT_TRUE('1' + i == tiny_get_object_key(o, i)[0]);
+      EXPECT_EQ_SIZE_T(1, tiny_get_object_key_length(o, i));
+      EXPECT_EQ_INT(TINY_NUMBER, tiny_get_type(ov));
+      EXPECT_EQ_DOUBLE(i + 1.0, tiny_get_number(ov));
+    }
+  }
+  tiny_free(&v);
+}
+
 #define TEST_ERROR(error, json)                  \
   do                                             \
   {                                              \
@@ -333,6 +394,33 @@ static void test_access_string()
   EXPECT_EQ_STRING("Hello", tiny_get_string(&v), tiny_get_string_length(&v));
   tiny_free(&v);
 }
+
+static void test_parse_miss_key()
+{
+  TEST_ERROR(TINY_PARSE_MISS_KEY, "{:1,");
+  TEST_ERROR(TINY_PARSE_MISS_KEY, "{1:1,");
+  TEST_ERROR(TINY_PARSE_MISS_KEY, "{true:1,");
+  TEST_ERROR(TINY_PARSE_MISS_KEY, "{false:1,");
+  TEST_ERROR(TINY_PARSE_MISS_KEY, "{null:1,");
+  TEST_ERROR(TINY_PARSE_MISS_KEY, "{[]:1,");
+  TEST_ERROR(TINY_PARSE_MISS_KEY, "{{}:1,");
+  TEST_ERROR(TINY_PARSE_MISS_KEY, "{\"a\":1,");
+}
+
+static void test_parse_miss_colon()
+{
+  TEST_ERROR(TINY_PARSE_MISS_COLON, "{\"a\"}");
+  TEST_ERROR(TINY_PARSE_MISS_COLON, "{\"a\",\"b\"}");
+}
+
+static void test_parse_miss_comma_or_curly_bracket()
+{
+  TEST_ERROR(TINY_PARSE_MISS_COMMA_OR_CURLY_BRACKET, "{\"a\":1");
+  TEST_ERROR(TINY_PARSE_MISS_COMMA_OR_CURLY_BRACKET, "{\"a\":1]");
+  TEST_ERROR(TINY_PARSE_MISS_COMMA_OR_CURLY_BRACKET, "{\"a\":1 \"b\"");
+  TEST_ERROR(TINY_PARSE_MISS_COMMA_OR_CURLY_BRACKET, "{\"a\":{}");
+}
+
 static void test_parse()
 {
   test_parse_true();
@@ -341,6 +429,10 @@ static void test_parse()
   test_parse_number();
   test_parse_string();
   test_parse_array();
+#if 1
+  test_parse_object();
+#endif
+
   test_parse_number_too_big();
   test_parse_expect_value();
   test_parse_invalid_value();
@@ -351,6 +443,12 @@ static void test_parse()
   test_parse_invalid_unicode_hex();
   test_parse_invalid_unicode_surrogate();
   test_parse_miss_comma_or_square_bracket();
+
+#if 1
+  test_parse_miss_key();
+  test_parse_miss_colon();
+  test_parse_miss_comma_or_curly_bracket();
+#endif
 }
 
 static void test_access()

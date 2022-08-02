@@ -18,11 +18,17 @@ typedef enum
 } tiny_type;
 
 typedef struct tiny_value tiny_value;
+typedef struct tiny_member tiny_member;
 
 struct tiny_value
 {
   union
   {
+    struct
+    {
+      tiny_member *m;
+      size_t size;
+    } o;  // object
     struct
     {
       tiny_value *e;
@@ -38,6 +44,13 @@ struct tiny_value
   tiny_type type;
 };
 
+struct tiny_member
+{
+  char *k;       // key
+  size_t klen;   // key len
+  tiny_value v;  // value
+};
+
 enum
 {
   TINY_PARSE_OK = 0,
@@ -51,6 +64,9 @@ enum
   TINY_PARSE_INVALID_UNICODE_HEX,
   TINY_PARSE_INVALID_UNICODE_SURROGATE,
   TINY_PARSE_MISS_COMMA_OR_SQUARE_BRACKET,
+  TINY_PARSE_MISS_KEY,
+  TINY_PARSE_MISS_COLON,
+  TINY_PARSE_MISS_COMMA_OR_CURLY_BRACKET,
 };
 
 #define tiny_init(v)       \
@@ -79,5 +95,10 @@ void tiny_set_string(tiny_value *v, const char *s, size_t len);
 
 size_t tiny_get_array_size(const tiny_value *v);
 tiny_value *tiny_get_array_element(const tiny_value *v, size_t index);
+
+size_t tiny_get_object_size(const tiny_value *v);
+const char *tiny_get_object_key(const tiny_value *v, size_t index);
+size_t tiny_get_object_key_length(const tiny_value *v, size_t index);
+tiny_value *tiny_get_object_value(const tiny_value *v, size_t index);
 
 #endif
