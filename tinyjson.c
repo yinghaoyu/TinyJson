@@ -156,13 +156,21 @@ static const char *tiny_parse_hex4(const char *p, unsigned *u)
     char ch = *p++;
     *u <<= 4;
     if (ch >= '0' && ch <= '9')
+    {
       *u |= ch - '0';
+    }
     else if (ch >= 'A' && ch <= 'F')
+    {
       *u |= ch - ('A' - 10);
+    }
     else if (ch >= 'a' && ch <= 'f')
+    {
       *u |= ch - ('a' - 10);
+    }
     else
+    {
       return NULL;
+    }
   }
   return p;
   // 这种方案会错误接受"\u 123"不合法的JSON，因为 strtol() 会跳过开始的空白
@@ -305,12 +313,97 @@ static int tiny_parse_string(tiny_context *c, tiny_value *v)
   }
 }
 
+static int tiny_parse_value(tiny_context *c, tiny_value *v);
+
+static int tiny_parse_array(tiny_context *c, tiny_value *v)
+{
+  size_t size = 0;
+  int i, ret;
+  EXPECT(c, '[');
+  // 解析空白字符
+  tiny_parse_whitespace(c);
+  if (*c->json == ']')
+  {
+    // 数组内没有元素
+    c->json++;
+    v->type = TINY_ARRAY;
+    v->u.a.size = 0;
+    v->u.a.e = NULL;
+    return TINY_PARSE_OK;
+  }
+  for (;;)
+  {
+    tiny_value e;
+    tiny_init(&e);
+    // buggy
+    // 因为 lept_parse_value() 及之下的函数都需要调用 lept_context_push()
+    // 而 lept_context_push() 在发现栈满了的时候会用 realloc() 扩容。
+    // 这时候，我们上层的 e 就会失效
+
+    // tiny_value *e = tiny_context_push(c, sizeof(tiny_value));  // 可能会失效
+    // tiny_init(e);
+    // size++;
+    // if ((ret = tiny_parse_value(c, e)) != tiny_PARSE_OK)  // 可能会realloc()
+    //  return ret;
+
+    if ((ret = tiny_parse_value(c, &e)) != TINY_PARSE_OK)
+    {
+      break;
+    }
+    // 解析空白字符
+    tiny_parse_whitespace(c);
+    memcpy(tiny_context_push(c, sizeof(tiny_value)), &e, sizeof(tiny_value));
+    size++;
+    if (*c->json == ',')
+    {
+      c->json++;
+      // 解析空白字符
+      tiny_parse_whitespace(c);
+    }
+    else if (*c->json == ']')
+    {
+      // 数组结束
+      c->json++;
+      v->type = TINY_ARRAY;
+      v->u.a.size = size;
+      // size 表示的是元素的数量
+      size *= sizeof(tiny_value);
+      memcpy(v->u.a.e = (tiny_value *) malloc(size), tiny_context_pop(c, size), size);
+      return TINY_PARSE_OK;
+    }
+    else
+    {
+      // 不匹配 ']'
+      ret = TINY_PARSE_MISS_COMMA_OR_SQUARE_BRACKET;
+      break;
+    }
+  }
+  /* Pop and free values on the stack */
+  for (i = 0; i < size; i++)
+  {
+    tiny_free((tiny_value *) tiny_context_pop(c, sizeof(tiny_value)));
+  }
+  return ret;
+}
+
 void tiny_free(tiny_value *v)
 {
+  size_t i;
   assert(v != NULL);
-  if (v->type == TINY_STRING)
+  switch (v->type)
   {
+  case TINY_STRING:
     free(v->u.s.s);
+    break;
+  case TINY_ARRAY:
+    for (i = 0; i < v->u.a.size; i++)
+    {
+      tiny_free(&v->u.a.e[i]);
+    }
+    free(v->u.a.e);
+    break;
+  default:
+    break;
   }
   v->type = TINY_NULL;
 }
@@ -352,6 +445,8 @@ static int tiny_parse_value(tiny_context *c, tiny_value *v)
     return TINY_PARSE_EXPECT_VALUE;
   case '"':
     return tiny_parse_string(c, v);
+  case '[':
+    return tiny_parse_array(c, v);
   default:
     return tiny_parse_number(c, v);
   }
@@ -412,4 +507,17 @@ void tiny_set_number(tiny_value *v, double n)
   tiny_free(v);
   v->u.n = n;
   v->type = TINY_NUMBER;
+}
+
+size_t tiny_get_array_size(const tiny_value *v)
+{
+  assert(v != NULL && v->type == TINY_ARRAY);
+  return v->u.a.size;
+}
+
+tiny_value *tiny_get_array_element(const tiny_value *v, size_t index)
+{
+  assert(v != NULL && v->type == TINY_ARRAY);
+  assert(index < v->u.a.size);
+  return &v->u.a.e[index];
 }

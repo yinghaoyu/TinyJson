@@ -17,10 +17,17 @@ typedef enum
   TINY_OBJECT
 } tiny_type;
 
-typedef struct
+typedef struct tiny_value tiny_value;
+
+struct tiny_value
 {
   union
   {
+    struct
+    {
+      tiny_value *e;
+      size_t size;
+    } a;  // array
     struct
     {
       char *s;
@@ -29,7 +36,7 @@ typedef struct
     double n;  // number
   } u;
   tiny_type type;
-} tiny_value;
+};
 
 enum
 {
@@ -43,6 +50,7 @@ enum
   TINY_PARSE_INVALID_STRING_CHAR,
   TINY_PARSE_INVALID_UNICODE_HEX,
   TINY_PARSE_INVALID_UNICODE_SURROGATE,
+  TINY_PARSE_MISS_COMMA_OR_SQUARE_BRACKET,
 };
 
 #define tiny_init(v)       \
@@ -68,5 +76,8 @@ void tiny_set_number(tiny_value *v, double n);
 const char *tiny_get_string(const tiny_value *v);
 size_t tiny_get_string_length(const tiny_value *v);
 void tiny_set_string(tiny_value *v, const char *s, size_t len);
+
+size_t tiny_get_array_size(const tiny_value *v);
+tiny_value *tiny_get_array_element(const tiny_value *v, size_t index);
 
 #endif
