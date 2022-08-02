@@ -146,9 +146,72 @@ static int tiny_parse_number(tiny_context *c, tiny_value *v)
   return TINY_PARSE_OK;
 }
 
+// 读取4位16进制数
+static const char *tiny_parse_hex4(const char *p, unsigned *u)
+{
+  int i;
+  *u = 0;
+  for (i = 0; i < 4; i++)
+  {
+    char ch = *p++;
+    *u <<= 4;
+    if (ch >= '0' && ch <= '9')
+      *u |= ch - '0';
+    else if (ch >= 'A' && ch <= 'F')
+      *u |= ch - ('A' - 10);
+    else if (ch >= 'a' && ch <= 'f')
+      *u |= ch - ('a' - 10);
+    else
+      return NULL;
+  }
+  return p;
+  // 这种方案会错误接受"\u 123"不合法的JSON，因为 strtol() 会跳过开始的空白
+  // 要解决的话，还需要检测第一个字符是否 [0-9A-Fa-f]，或者 !isspace(*p)
+  // char *end;
+  //*u = (unsigned) strtol(p, &end, 16);
+  // return end == p + 4 ? end : NULL;
+}
+
+static void tiny_encode_utf8(tiny_context *c, unsigned u)
+{
+  if (u <= 0x7F)
+  {
+    // 写进一个 char，为什么要做 x & 0xFF 这种操作呢？
+    // 这是因为 u 是 unsigned 类型，一些编译器可能会警告这个转型可能会截断数据
+    PUTC(c, u & 0xFF);
+  }
+  else if (u <= 0x7FF)
+  {
+    PUTC(c, 0xC0 | ((u >> 6) & 0xFF));
+    PUTC(c, 0x80 | (u & 0x3F));
+  }
+  else if (u <= 0xFFFF)
+  {
+    PUTC(c, 0xE0 | ((u >> 12) & 0xFF));
+    PUTC(c, 0x80 | ((u >> 6) & 0x3F));
+    PUTC(c, 0x80 | (u & 0x3F));
+  }
+  else
+  {
+    assert(u <= 0x10FFFF);
+    PUTC(c, 0xF0 | ((u >> 18) & 0xFF));
+    PUTC(c, 0x80 | ((u >> 12) & 0x3F));
+    PUTC(c, 0x80 | ((u >> 6) & 0x3F));
+    PUTC(c, 0x80 | (u & 0x3F));
+  }
+}
+
+#define STRING_ERROR(ret) \
+  do                      \
+  {                       \
+    c->top = head;        \
+    return ret;           \
+  } while (0)
+
 static int tiny_parse_string(tiny_context *c, tiny_value *v)
 {
   size_t head = c->top, len;
+  unsigned u, u2;
   const char *p;
   EXPECT(c, '\"');
   p = c->json;
@@ -191,23 +254,51 @@ static int tiny_parse_string(tiny_context *c, tiny_value *v)
       case 't':
         PUTC(c, '\t');
         break;
+      case 'u':
+        if (!(p = tiny_parse_hex4(p, &u)))
+        {
+          STRING_ERROR(TINY_PARSE_INVALID_UNICODE_HEX);
+        }
+        // 如果第一个码点在0xD800 ~ 0xDBFF之间
+        if (u >= 0xD800 && u <= 0xDBFF)
+        {
+          /* surrogate pair */
+          // 应该伴随一个 U+DC00 ~ U+DFFF的低级代理项
+          if (*p++ != '\\')
+          {
+            STRING_ERROR(TINY_PARSE_INVALID_UNICODE_SURROGATE);
+          }
+          if (*p++ != 'u')
+          {
+            STRING_ERROR(TINY_PARSE_INVALID_UNICODE_SURROGATE);
+          }
+          if (!(p = tiny_parse_hex4(p, &u2)))
+          {
+            STRING_ERROR(TINY_PARSE_INVALID_UNICODE_HEX);
+          }
+          if (u2 < 0xDC00 || u2 > 0xDFFF)
+          {
+            STRING_ERROR(TINY_PARSE_INVALID_UNICODE_SURROGATE);
+          }
+          // 计算真实的码点
+          u = (((u - 0xD800) << 10) | (u2 - 0xDC00)) + 0x10000;
+        }
+        tiny_encode_utf8(c, u);
+        break;
       default:
-        c->top = head;
-        return TINY_PARSE_INVALID_STRING_ESCAPE;
+        STRING_ERROR(TINY_PARSE_INVALID_STRING_ESCAPE);
       }
       break;
     case '\0':
       // 不匹配""
-      c->top = head;  // 重置栈顶
-      return TINY_PARSE_MISS_QUOTATION_MARK;
+      STRING_ERROR(TINY_PARSE_MISS_QUOTATION_MARK);
     default:
       // char 带不带符号，是实现定义的。
-      // 如果编译器定义 char 为带符号的话，(unsigned char)ch >= 0x80 的字符，都会变成负数，并产生 LEPT_PARSE_INVALID_STRING_CHAR 错误。
+      // 如果编译器定义 char 为带符号的话，(unsigned char)ch >= 0x80 的字符，都会变成负数，并产生 tiny_PARSE_INVALID_STRING_CHAR 错误。
       // 我们现时还没有测试 ASCII 以外的字符，所以有没有转型至不带符号都不影响，但开始处理 Unicode 的时候就要考虑了
       if ((unsigned char) ch < 0x20)
       {
-        c->top = head;
-        return TINY_PARSE_INVALID_STRING_CHAR;
+        STRING_ERROR(TINY_PARSE_INVALID_STRING_CHAR);
       }
       PUTC(c, ch);  // 把字符进栈
     }
@@ -310,7 +401,7 @@ int tiny_get_boolean(const tiny_value *v)
 
 void tiny_set_boolean(tiny_value *v, int b)
 {
-  // valgrind --leak-check=full  ./leptjson_test
+  // valgrind --leak-check=full  ./tinyjson_test
   // catch no free
   tiny_free(v);
   v->type = b ? TINY_TRUE : TINY_FALSE;
