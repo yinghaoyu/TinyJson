@@ -17,6 +17,8 @@ typedef enum
   TINY_OBJECT
 } tiny_type;
 
+#define TINY_KEY_NOT_EXIST ((size_t) -1)
+
 typedef struct tiny_value tiny_value;
 typedef struct tiny_member tiny_member;
 
@@ -28,11 +30,13 @@ struct tiny_value
     {
       tiny_member *m;
       size_t size;
+      size_t capacity;
     } o;  // object
     struct
     {
       tiny_value *e;
       size_t size;
+      size_t capacity;
     } a;  // array
     struct
     {
@@ -76,6 +80,7 @@ enum
   } while (0)
 
 int tiny_parse(tiny_value *v, const char *json);
+char *tiny_stringify(const tiny_value *v, size_t *length);
 
 void tiny_free(tiny_value *v);
 
@@ -100,5 +105,20 @@ size_t tiny_get_object_size(const tiny_value *v);
 const char *tiny_get_object_key(const tiny_value *v, size_t index);
 size_t tiny_get_object_key_length(const tiny_value *v, size_t index);
 tiny_value *tiny_get_object_value(const tiny_value *v, size_t index);
+size_t tiny_find_object_index(const tiny_value *v, const char *key, size_t klen);
+tiny_value *tiny_find_object_value(tiny_value *v, const char *key, size_t klen);
+tiny_value *tiny_set_object_value(tiny_value *v, const char *key, size_t klen);
+void tiny_remove_object_value(tiny_value *v, size_t index);
+void tiny_erase_array_element(tiny_value *v, size_t index, size_t count);
+int tiny_is_equal(const tiny_value *lhs, const tiny_value *rhs);
+size_t tiny_get_array_capacity(const tiny_value *v);
+void tiny_shrink_array(tiny_value *v);
+void tiny_move(tiny_value *dst, tiny_value *src);
+tiny_value *tiny_pushback_array_element(tiny_value *v);
+void tiny_clear_array(tiny_value *v);
+void tiny_copy(tiny_value *dst, const tiny_value *src);
+void tiny_set_array(tiny_value *v, size_t capacity);
+void tiny_swap(tiny_value *lhs, tiny_value *rhs);
+void tiny_popback_array_element(tiny_value *v);
 
 #endif

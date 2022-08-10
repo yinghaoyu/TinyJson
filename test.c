@@ -1,3 +1,7 @@
+#ifdef _WINDOWS
+#define _CRTDBG_MAP_ALLOC
+#include <crtdbg.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -451,17 +455,326 @@ static void test_parse()
 #endif
 }
 
+#define TEST_ROUNDTRIP(json)                            \
+  do                                                    \
+  {                                                     \
+    tiny_value v;                                       \
+    char *json2;                                        \
+    size_t length;                                      \
+    tiny_init(&v);                                      \
+    EXPECT_EQ_INT(TINY_PARSE_OK, tiny_parse(&v, json)); \
+    json2 = tiny_stringify(&v, &length);                \
+    EXPECT_EQ_STRING(json, json2, length);              \
+    tiny_free(&v);                                      \
+    free(json2);                                        \
+  } while (0)
+
+static void test_stringify_number()
+{
+  TEST_ROUNDTRIP("0");
+  TEST_ROUNDTRIP("-0");
+  TEST_ROUNDTRIP("1");
+  TEST_ROUNDTRIP("-1");
+  TEST_ROUNDTRIP("1.5");
+  TEST_ROUNDTRIP("-1.5");
+  TEST_ROUNDTRIP("3.25");
+  TEST_ROUNDTRIP("1e+20");
+  TEST_ROUNDTRIP("1.234e+20");
+  TEST_ROUNDTRIP("1.234e-20");
+
+  TEST_ROUNDTRIP("1.0000000000000002");      /* the smallest number > 1 */
+  TEST_ROUNDTRIP("4.9406564584124654e-324"); /* minimum denormal */
+  TEST_ROUNDTRIP("-4.9406564584124654e-324");
+  TEST_ROUNDTRIP("2.2250738585072009e-308"); /* Max subnormal double */
+  TEST_ROUNDTRIP("-2.2250738585072009e-308");
+  TEST_ROUNDTRIP("2.2250738585072014e-308"); /* Min normal positive double */
+  TEST_ROUNDTRIP("-2.2250738585072014e-308");
+  TEST_ROUNDTRIP("1.7976931348623157e+308"); /* Max double */
+  TEST_ROUNDTRIP("-1.7976931348623157e+308");
+}
+static void test_stringify_string()
+{
+  TEST_ROUNDTRIP("\"\"");
+  TEST_ROUNDTRIP("\"Hello\"");
+  TEST_ROUNDTRIP("\"Hello\\nWorld\"");
+  TEST_ROUNDTRIP("\"\\\" \\\\ / \\b \\f \\n \\r \\t\"");
+  TEST_ROUNDTRIP("\"Hello\\u0000World\"");
+}
+
+static void test_stringify_array()
+{
+  TEST_ROUNDTRIP("[]");
+  TEST_ROUNDTRIP("[null,false,true,123,\"abc\",[1,2,3]]");
+}
+
+static void test_stringify_object()
+{
+  TEST_ROUNDTRIP("{}");
+  TEST_ROUNDTRIP("{\"n\":null,\"f\":false,\"t\":true,\"i\":123,\"s\":\"abc\",\"a\":[1,2,3],\"o\":{\"1\":1,\"2\":2,\"3\":3}}");
+}
+
+static void test_stringify()
+{
+  TEST_ROUNDTRIP("null");
+  TEST_ROUNDTRIP("false");
+  TEST_ROUNDTRIP("true");
+  test_stringify_number();
+  test_stringify_string();
+  test_stringify_array();
+  test_stringify_object();
+}
+
+#define TEST_EQUAL(json1, json2, equality)                \
+  do                                                      \
+  {                                                       \
+    tiny_value v1, v2;                                    \
+    tiny_init(&v1);                                       \
+    tiny_init(&v2);                                       \
+    EXPECT_EQ_INT(TINY_PARSE_OK, tiny_parse(&v1, json1)); \
+    EXPECT_EQ_INT(TINY_PARSE_OK, tiny_parse(&v2, json2)); \
+    EXPECT_EQ_INT(equality, tiny_is_equal(&v1, &v2));     \
+    tiny_free(&v1);                                       \
+    tiny_free(&v2);                                       \
+  } while (0)
+
+static void test_equal()
+{
+  TEST_EQUAL("true", "true", 1);
+  TEST_EQUAL("true", "false", 0);
+  TEST_EQUAL("false", "false", 1);
+  TEST_EQUAL("null", "null", 1);
+  TEST_EQUAL("null", "0", 0);
+  TEST_EQUAL("123", "123", 1);
+  TEST_EQUAL("123", "456", 0);
+  TEST_EQUAL("\"abc\"", "\"abc\"", 1);
+  TEST_EQUAL("\"abc\"", "\"abcd\"", 0);
+  TEST_EQUAL("[]", "[]", 1);
+  TEST_EQUAL("[]", "null", 0);
+  TEST_EQUAL("[1,2,3]", "[1,2,3]", 1);
+  TEST_EQUAL("[1,2,3]", "[1,2,3,4]", 0);
+  TEST_EQUAL("[[]]", "[[]]", 1);
+  TEST_EQUAL("{}", "{}", 1);
+  TEST_EQUAL("{}", "null", 0);
+  TEST_EQUAL("{}", "[]", 0);
+  TEST_EQUAL("{\"a\":1,\"b\":2}", "{\"a\":1,\"b\":2}", 1);
+  TEST_EQUAL("{\"a\":1,\"b\":2}", "{\"b\":2,\"a\":1}", 1);
+  TEST_EQUAL("{\"a\":1,\"b\":2}", "{\"a\":1,\"b\":3}", 0);
+  TEST_EQUAL("{\"a\":1,\"b\":2}", "{\"a\":1,\"b\":2,\"c\":3}", 0);
+  TEST_EQUAL("{\"a\":{\"b\":{\"c\":{}}}}", "{\"a\":{\"b\":{\"c\":{}}}}", 1);
+  TEST_EQUAL("{\"a\":{\"b\":{\"c\":{}}}}", "{\"a\":{\"b\":{\"c\":[]}}}", 0);
+}
+
+static void test_copy()
+{
+  tiny_value v1, v2;
+  tiny_init(&v1);
+  tiny_parse(&v1, "{\"t\":true,\"f\":false,\"n\":null,\"d\":1.5,\"a\":[1,2,3]}");
+  tiny_init(&v2);
+  tiny_copy(&v2, &v1);
+  EXPECT_TRUE(tiny_is_equal(&v2, &v1));
+  tiny_free(&v1);
+  tiny_free(&v2);
+}
+
+static void test_move()
+{
+  tiny_value v1, v2, v3;
+  tiny_init(&v1);
+  tiny_parse(&v1, "{\"t\":true,\"f\":false,\"n\":null,\"d\":1.5,\"a\":[1,2,3]}");
+  tiny_init(&v2);
+  tiny_copy(&v2, &v1);
+  tiny_init(&v3);
+  tiny_move(&v3, &v2);
+  EXPECT_EQ_INT(TINY_NULL, tiny_get_type(&v2));
+  EXPECT_TRUE(tiny_is_equal(&v3, &v1));
+  tiny_free(&v1);
+  tiny_free(&v2);
+  tiny_free(&v3);
+}
+
+static void test_swap()
+{
+  tiny_value v1, v2;
+  tiny_init(&v1);
+  tiny_init(&v2);
+  tiny_set_string(&v1, "Hello", 5);
+  tiny_set_string(&v2, "World!", 6);
+  tiny_swap(&v1, &v2);
+  EXPECT_EQ_STRING("World!", tiny_get_string(&v1), tiny_get_string_length(&v1));
+  EXPECT_EQ_STRING("Hello", tiny_get_string(&v2), tiny_get_string_length(&v2));
+  tiny_free(&v1);
+  tiny_free(&v2);
+}
+
+static void test_access_array()
+{
+  tiny_value a, e;
+  size_t i, j;
+
+  tiny_init(&a);
+
+  for (j = 0; j <= 5; j += 5)
+  {
+    tiny_set_array(&a, j);
+    EXPECT_EQ_SIZE_T(0, tiny_get_array_size(&a));
+    EXPECT_EQ_SIZE_T(j, tiny_get_array_capacity(&a));
+    for (i = 0; i < 10; i++)
+    {
+      tiny_init(&e);
+      tiny_set_number(&e, i);
+      tiny_move(tiny_pushback_array_element(&a), &e);
+      tiny_free(&e);
+    }
+
+    EXPECT_EQ_SIZE_T(10, tiny_get_array_size(&a));
+    for (i = 0; i < 10; i++)
+      EXPECT_EQ_DOUBLE((double) i, tiny_get_number(tiny_get_array_element(&a, i)));
+  }
+
+  tiny_popback_array_element(&a);
+  EXPECT_EQ_SIZE_T(9, tiny_get_array_size(&a));
+  for (i = 0; i < 9; i++)
+    EXPECT_EQ_DOUBLE((double) i, tiny_get_number(tiny_get_array_element(&a, i)));
+
+  tiny_erase_array_element(&a, 4, 0);
+  EXPECT_EQ_SIZE_T(9, tiny_get_array_size(&a));
+  for (i = 0; i < 9; i++)
+    EXPECT_EQ_DOUBLE((double) i, tiny_get_number(tiny_get_array_element(&a, i)));
+
+  tiny_erase_array_element(&a, 8, 1);
+  EXPECT_EQ_SIZE_T(8, tiny_get_array_size(&a));
+  for (i = 0; i < 8; i++)
+    EXPECT_EQ_DOUBLE((double) i, tiny_get_number(tiny_get_array_element(&a, i)));
+
+  tiny_erase_array_element(&a, 0, 2);
+  EXPECT_EQ_SIZE_T(6, tiny_get_array_size(&a));
+  for (i = 0; i < 6; i++)
+    EXPECT_EQ_DOUBLE((double) i + 2, tiny_get_number(tiny_get_array_element(&a, i)));
+
+#if 0
+    for (i = 0; i < 2; i++) {
+        tiny_init(&e);
+        tiny_set_number(&e, i);
+        tiny_move(tiny_insert_array_element(&a, i), &e);
+        tiny_free(&e);
+    }
+#endif
+  EXPECT_EQ_SIZE_T(8, tiny_get_array_size(&a));
+  for (i = 0; i < 8; i++)
+    EXPECT_EQ_DOUBLE((double) i, tiny_get_number(tiny_get_array_element(&a, i)));
+
+  EXPECT_TRUE(tiny_get_array_capacity(&a) > 8);
+  tiny_shrink_array(&a);
+  EXPECT_EQ_SIZE_T(8, tiny_get_array_capacity(&a));
+  EXPECT_EQ_SIZE_T(8, tiny_get_array_size(&a));
+  for (i = 0; i < 8; i++)
+    EXPECT_EQ_DOUBLE((double) i, tiny_get_number(tiny_get_array_element(&a, i)));
+
+  tiny_set_string(&e, "Hello", 5);
+  tiny_move(tiny_pushback_array_element(&a), &e); /* Test if element is freed */
+  tiny_free(&e);
+  i = tiny_get_array_capacity(&a);
+  tiny_clear_array(&a);
+  EXPECT_EQ_SIZE_T(0, tiny_get_array_size(&a));
+  EXPECT_EQ_SIZE_T(i, tiny_get_array_capacity(&a)); /* capacity remains unchanged */
+  tiny_shrink_array(&a);
+  EXPECT_EQ_SIZE_T(0, tiny_get_array_capacity(&a));
+
+  tiny_free(&a);
+}
+
+static void test_access_object()
+{
+#if 0
+    tiny_value o, v, *pv;
+    size_t i, j, index;
+
+    tiny_init(&o);
+
+    for (j = 0; j <= 5; j += 5) {
+        tiny_set_object(&o, j);
+        EXPECT_EQ_SIZE_T(0, tiny_get_object_size(&o));
+        EXPECT_EQ_SIZE_T(j, tiny_get_object_capacity(&o));
+        for (i = 0; i < 10; i++) {
+            char key[2] = "a";
+            key[0] += i;
+            tiny_init(&v);
+            tiny_set_number(&v, i);
+            tiny_move(tiny_set_object_value(&o, key, 1), &v);
+            tiny_free(&v);
+        }
+        EXPECT_EQ_SIZE_T(10, tiny_get_object_size(&o));
+        for (i = 0; i < 10; i++) {
+            char key[] = "a";
+            key[0] += i;                                                                          index = tiny_find_object_index(&o, key, 1);
+            EXPECT_TRUE(index != tiny_KEY_NOT_EXIST);
+            pv = tiny_get_object_value(&o, index);
+            EXPECT_EQ_DOUBLE((double)i, tiny_get_number(pv));
+        }
+            }
+
+    index = tiny_find_object_index(&o, "j", 1);▫▫▫▫
+    EXPECT_TRUE(index != tiny_KEY_NOT_EXIST);
+    tiny_remove_object_value(&o, index);
+    index = tiny_find_object_index(&o, "j", 1);
+    EXPECT_TRUE(index == tiny_KEY_NOT_EXIST);
+    EXPECT_EQ_SIZE_T(9, tiny_get_object_size(&o));
+
+    index = tiny_find_object_index(&o, "a", 1);
+    EXPECT_TRUE(index != tiny_KEY_NOT_EXIST);
+    tiny_remove_object_value(&o, index);
+    index = tiny_find_object_index(&o, "a", 1);
+    EXPECT_TRUE(index == tiny_KEY_NOT_EXIST);
+    EXPECT_EQ_SIZE_T(8, tiny_get_object_size(&o));
+
+    EXPECT_TRUE(tiny_get_object_capacity(&o) > 8);
+    tiny_shrink_object(&o);
+    EXPECT_EQ_SIZE_T(8, tiny_get_object_capacity(&o));
+    EXPECT_EQ_SIZE_T(8, tiny_get_object_size(&o));
+    for (i = 0; i < 8; i++) {
+        char key[] = "a";
+        key[0] += i + 1;                                                                      EXPECT_EQ_DOUBLE((double)i + 1, tiny_get_number(tiny_get_object_value(&o, tiny_find_object_index(&o, key, 1))));
+    }
+        tiny_set_string(&v, "Hello", 5);
+    tiny_move(tiny_set_object_value(&o, "World", 5), &v); /* Test if element is freed */
+    tiny_free(&v);
+
+    pv = tiny_find_object_value(&o, "World", 5);
+    EXPECT_TRUE(pv != NULL);
+    EXPECT_EQ_STRING("Hello", tiny_get_string(pv), tiny_get_string_length(pv));
+
+    i = tiny_get_object_capacity(&o);
+    tiny_clear_object(&o);
+    EXPECT_EQ_SIZE_T(0, tiny_get_object_size(&o));
+    EXPECT_EQ_SIZE_T(i, tiny_get_object_capacity(&o)); /* capacity remains unchanged */
+    tiny_shrink_object(&o);
+    EXPECT_EQ_SIZE_T(0, tiny_get_object_capacity(&o));
+
+    tiny_free(&o);
+#endif
+}
+
 static void test_access()
 {
   test_access_null();
   test_access_boolean();
   test_access_number();
   test_access_string();
+  test_access_array();
+  test_access_object();
 }
 
 int main()
 {
+#ifdef _WINDOWS
+  _CrtSetDbgFlag(_CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF);
+#endif
   test_parse();
+  test_stringify();
+  test_equal();
+  test_copy();
+  test_move();
+  test_swap();
   test_access();
   printf("%d/%d (%3.2f%%) passed\n", test_pass, test_count, test_pass * 100.0 / test_count);
   return main_ret;

@@ -2,11 +2,16 @@
 #include <assert.h>  // assert()
 #include <errno.h>   // errno, ERANGE
 #include <math.h>    // HUGE_VAL
+#include <stdio.h>   // sprintf()
 #include <stdlib.h>  // NULL, strtod()
 #include <string.h>  // memcpy()
 
 #ifndef TINY_PARSE_STACK_INIT_SIZE
 #define TINY_PARSE_STACK_INIT_SIZE 256
+#endif
+
+#ifndef TINY_PARSE_STRINGIFY_INIT_SIZE
+#define TINY_PARSE_STRINGIFY_INIT_SIZE 256
 #endif
 
 #define EXPECT(c, ch)         \
@@ -15,13 +20,18 @@
     assert(*c->json == (ch)); \
     c->json++;                \
   } while (0)
+
 #define ISDIGIT(ch) ((ch) >= '0' && (ch) <= '9')
+
 #define ISDIGIT1TO9(ch) ((ch) >= '1' && (ch) <= '9')
+
 #define PUTC(c, ch)                                      \
   do                                                     \
   {                                                      \
     *(char *) tiny_context_push(c, sizeof(char)) = (ch); \
   } while (0)
+
+#define PUTS(c, s, len) memcpy(tiny_context_push(c, len), s, len)
 
 typedef struct
 {
@@ -533,6 +543,157 @@ void tiny_set_string(tiny_value *v, const char *s, size_t len)
   v->type = TINY_STRING;
 }
 
+void tiny_set_array(tiny_value *v, size_t capacity)
+{
+  assert(v != NULL);
+  tiny_free(v);
+  v->type = TINY_ARRAY;
+  v->u.a.size = 0;
+  v->u.a.capacity = capacity;
+  v->u.a.e = capacity > 0 ? (tiny_value *) malloc(capacity * sizeof(tiny_value)) : NULL;
+}
+
+size_t tiny_get_array_size(const tiny_value *v)
+{
+  assert(v != NULL && v->type == TINY_ARRAY);
+  return v->u.a.size;
+}
+
+size_t tiny_get_array_capacity(const tiny_value *v)
+{
+  assert(v != NULL && v->type == TINY_ARRAY);
+  return v->u.a.capacity;
+}
+
+void tiny_reserve_array(tiny_value *v, size_t capacity)
+{
+  assert(v != NULL && v->type == TINY_ARRAY);
+  if (v->u.a.capacity < capacity)
+  {
+    v->u.a.capacity = capacity;
+    v->u.a.e = (tiny_value *) realloc(v->u.a.e, capacity * sizeof(tiny_value));
+  }
+}
+
+void tiny_shrink_array(tiny_value *v)
+{
+  assert(v != NULL && v->type == TINY_ARRAY);
+  if (v->u.a.capacity > v->u.a.size)
+  {
+    v->u.a.capacity = v->u.a.size;
+    v->u.a.e = (tiny_value *) realloc(v->u.a.e, v->u.a.capacity * sizeof(tiny_value));
+  }
+}
+
+void tiny_clear_array(tiny_value *v)
+{
+  assert(v != NULL && v->type == TINY_ARRAY);
+  tiny_erase_array_element(v, 0, v->u.a.size);
+}
+
+tiny_value *tiny_pushback_array_element(tiny_value *v)
+{
+  assert(v != NULL && v->type == TINY_ARRAY);
+  if (v->u.a.size == v->u.a.capacity)
+    tiny_reserve_array(v, v->u.a.capacity == 0 ? 1 : v->u.a.capacity * 2);
+  tiny_init(&v->u.a.e[v->u.a.size]);
+  return &v->u.a.e[v->u.a.size++];
+}
+
+void tiny_popback_array_element(tiny_value *v)
+{
+  assert(v != NULL && v->type == TINY_ARRAY && v->u.a.size > 0);
+  tiny_free(&v->u.a.e[--v->u.a.size]);
+}
+
+tiny_value *tiny_insert_array_element(tiny_value *v, size_t index)
+{
+  assert(v != NULL && v->type == TINY_ARRAY && index <= v->u.a.size); /* \todo */
+  return NULL;
+}
+
+void tiny_set_object(tiny_value *v, size_t capacity)
+{
+  assert(v != NULL);
+  tiny_free(v);
+  v->type = TINY_OBJECT;
+  v->u.o.size = 0;
+  v->u.o.capacity = capacity;
+  v->u.o.m = capacity > 0 ? (tiny_member *) malloc(capacity * sizeof(tiny_member)) : NULL;
+}
+
+size_t tiny_get_object_size(const tiny_value *v)
+{
+  assert(v != NULL && v->type == TINY_OBJECT);
+  return v->u.o.size;
+}
+
+size_t tiny_get_object_capacity(const tiny_value *v)
+{
+  assert(v != NULL && v->type == TINY_OBJECT);
+  /* \todo */
+  return 0;
+}
+
+void tiny_reserve_object(tiny_value *v, size_t capacity)
+{
+  assert(v != NULL && v->type == TINY_OBJECT); /* \todo */
+}
+void tiny_shrink_object(tiny_value *v)
+{
+  assert(v != NULL && v->type == TINY_OBJECT);
+  /* \todo */
+}
+
+void tiny_clear_object(tiny_value *v)
+{
+  assert(v != NULL && v->type == TINY_OBJECT);
+  /* \todo */
+}
+
+const char *tiny_get_object_key(const tiny_value *v, size_t index)
+{
+  assert(v != NULL && v->type == TINY_OBJECT);
+  assert(index < v->u.o.size);
+  return v->u.o.m[index].k;
+}
+
+size_t tiny_get_object_key_length(const tiny_value *v, size_t index)
+{
+  assert(v != NULL && v->type == TINY_OBJECT);
+  assert(index < v->u.o.size);
+  return v->u.o.m[index].klen;
+}
+
+size_t tiny_find_object_index(const tiny_value *v, const char *key, size_t klen)
+{
+  size_t i;
+  assert(v != NULL && v->type == TINY_OBJECT && key != NULL);
+  for (i = 0; i < v->u.o.size; i++)
+    if (v->u.o.m[i].klen == klen && memcmp(v->u.o.m[i].k, key, klen) == 0)
+      return i;
+  return TINY_KEY_NOT_EXIST;
+}
+
+tiny_value *tiny_find_object_value(tiny_value *v, const char *key, size_t klen)
+{
+  size_t index = tiny_find_object_index(v, key, klen);
+  return index != TINY_KEY_NOT_EXIST ? &v->u.o.m[index].v : NULL;
+}
+
+tiny_value *tiny_set_object_value(tiny_value *v, const char *key, size_t klen)
+{
+  assert(v != NULL && v->type == TINY_OBJECT && key != NULL);
+  /* \todo */
+  return NULL;
+}
+
+void tiny_remove_object_value(tiny_value *v, size_t index)
+{
+  assert(v != NULL && v->type == TINY_OBJECT && index < v->u.o.size);
+  /* \todo */
+}
+
 static int tiny_parse_value(tiny_context *c, tiny_value *v)
 {
   switch (*c->json)
@@ -580,10 +741,244 @@ int tiny_parse(tiny_value *v, const char *json)
   return ret;
 }
 
+#if 0
+static void tiny_stringify_string(tiny_context *c, const char *s, size_t len)
+{
+  size_t i;
+  assert(s != NULL);
+  PUTC(c, '"');
+  for (i = 0; i < len; i++)
+  {
+    unsigned char ch = (unsigned char) s[i];
+    switch (ch)
+    {
+    case '\"':
+      PUTS(c, "\\\"", 2);
+      break;
+    case '\\':
+      PUTS(c, "\\\\", 2);
+      break;
+    case '\b':
+      PUTS(c, "\\b", 2);
+      break;
+    case '\f':
+      PUTS(c, "\\f", 2);
+      break;
+    case '\n':
+      PUTS(c, "\\n", 2);
+      break;
+    case '\r':
+      PUTS(c, "\\r", 2);
+      break;
+    case '\t':
+      PUTS(c, "\\t", 2);
+      break;
+    default:
+      if (ch < 0x20)
+      {
+        char buffer[7];
+        sprintf(buffer, "\\u%04X", ch);
+        PUTS(c, buffer, 6);
+      }
+      else
+        PUTC(c, s[i]);
+    }
+  }
+  PUTC(c, '"');
+}
+#else
+static void tiny_stringify_string(tiny_context *c, const char *s, size_t len)
+{
+  static const char hex_digits[] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
+  size_t i, size;
+  char *head, *p;
+  assert(s != NULL);
+  p = head = tiny_context_push(c, size = len * 6 + 2); /* "\u00xx..." */
+  *p++ = '"';
+  for (i = 0; i < len; i++)
+  {
+    unsigned char ch = (unsigned char) s[i];
+    switch (ch)
+    {
+    case '\"':
+      *p++ = '\\';
+      *p++ = '\"';
+      break;
+    case '\\':
+      *p++ = '\\';
+      *p++ = '\\';
+      break;
+    case '\b':
+      *p++ = '\\';
+      *p++ = 'b';
+      break;
+    case '\f':
+      *p++ = '\\';
+      *p++ = 'f';
+      break;
+    case '\n':
+      *p++ = '\\';
+      *p++ = 'n';
+      break;
+    case '\r':
+      *p++ = '\\';
+      *p++ = 'r';
+      break;
+    case '\t':
+      *p++ = '\\';
+      *p++ = 't';
+      break;
+    default:
+      if (ch < 0x20)
+      {
+        *p++ = '\\';
+        *p++ = 'u';
+        *p++ = '0';
+        *p++ = '0';
+        *p++ = hex_digits[ch >> 4];
+        *p++ = hex_digits[ch & 15];
+      }
+      else
+        *p++ = s[i];
+    }
+  }
+  *p++ = '"';
+  c->top -= size - (p - head);
+}
+#endif
+
+static void tiny_stringify_value(tiny_context *c, const tiny_value *v)
+{
+  size_t i;
+  switch (v->type)
+  {
+  case TINY_NULL:
+    PUTS(c, "null", 4);
+    break;
+  case TINY_FALSE:
+    PUTS(c, "false", 5);
+    break;
+  case TINY_TRUE:
+    PUTS(c, "true", 4);
+    break;
+  case TINY_NUMBER:
+    c->top -= 32 - sprintf(tiny_context_push(c, 32), "%.17g", v->u.n);
+    break;
+  case TINY_STRING:
+    tiny_stringify_string(c, v->u.s.s, v->u.s.len);
+    break;
+  case TINY_ARRAY:
+    PUTC(c, '[');
+    for (i = 0; i < v->u.a.size; i++)
+    {
+      if (i > 0)
+        PUTC(c, ',');
+      tiny_stringify_value(c, &v->u.a.e[i]);
+    }
+    PUTC(c, ']');
+    break;
+  case TINY_OBJECT:
+    PUTC(c, '{');
+    for (i = 0; i < v->u.o.size; i++)
+    {
+      if (i > 0)
+        PUTC(c, ',');
+      tiny_stringify_string(c, v->u.o.m[i].k, v->u.o.m[i].klen);
+      PUTC(c, ':');
+      tiny_stringify_value(c, &v->u.o.m[i].v);
+    }
+    PUTC(c, '}');
+    break;
+  default:
+    assert(0 && "invalid type");
+  }
+}
+
+char *tiny_stringify(const tiny_value *v, size_t *length)
+{
+  tiny_context c;
+  assert(v != NULL);
+  c.stack = (char *) malloc(c.size = TINY_PARSE_STRINGIFY_INIT_SIZE);
+  c.top = 0;
+  tiny_stringify_value(&c, v);
+  if (length)
+    *length = c.top;
+  PUTC(&c, '\0');
+  return c.stack;
+}
+
+void tiny_copy(tiny_value *dst, const tiny_value *src)
+{
+  assert(src != NULL && dst != NULL && src != dst);
+  switch (src->type)
+  {
+  case TINY_STRING:
+    tiny_set_string(dst, src->u.s.s, src->u.s.len);
+    break;
+  case TINY_ARRAY:
+    /* \todo */
+    break;
+  case TINY_OBJECT:
+    /* \todo */
+    break;
+  default:
+    tiny_free(dst);
+    memcpy(dst, src, sizeof(tiny_value));
+    break;
+  }
+}
+
+void tiny_move(tiny_value *dst, tiny_value *src)
+{
+  assert(dst != NULL && src != NULL && src != dst);
+  tiny_free(dst);
+  memcpy(dst, src, sizeof(tiny_value));
+  tiny_init(src);
+}
+
+void tiny_swap(tiny_value *lhs, tiny_value *rhs)
+{
+  assert(lhs != NULL && rhs != NULL);
+  if (lhs != rhs)
+  {
+    tiny_value temp;
+    memcpy(&temp, lhs, sizeof(tiny_value));
+    memcpy(lhs, rhs, sizeof(tiny_value));
+    memcpy(rhs, &temp, sizeof(tiny_value));
+  }
+}
+
 tiny_type tiny_get_type(const tiny_value *v)
 {
   assert(v != NULL);
   return v->type;
+}
+
+int tiny_is_equal(const tiny_value *lhs, const tiny_value *rhs)
+{
+  size_t i;
+  assert(lhs != NULL && rhs != NULL);
+  if (lhs->type != rhs->type)
+    return 0;
+  switch (lhs->type)
+  {
+  case TINY_STRING:
+    return lhs->u.s.len == rhs->u.s.len && memcmp(lhs->u.s.s, rhs->u.s.s, lhs->u.s.len) == 0;
+  case TINY_NUMBER:
+    return lhs->u.n == rhs->u.n;
+  case TINY_ARRAY:
+    if (lhs->u.a.size != rhs->u.a.size)
+      return 0;
+    for (i = 0; i < lhs->u.a.size; i++)
+      if (!tiny_is_equal(&lhs->u.a.e[i], &rhs->u.a.e[i]))
+        return 0;
+    return 1;
+  case TINY_OBJECT:
+    /* \todo */
+    return 1;
+  default:
+    return 1;
+  }
 }
 
 double tiny_get_number(const tiny_value *v)
@@ -613,12 +1008,6 @@ void tiny_set_number(tiny_value *v, double n)
   v->type = TINY_NUMBER;
 }
 
-size_t tiny_get_array_size(const tiny_value *v)
-{
-  assert(v != NULL && v->type == TINY_ARRAY);
-  return v->u.a.size;
-}
-
 tiny_value *tiny_get_array_element(const tiny_value *v, size_t index)
 {
   assert(v != NULL && v->type == TINY_ARRAY);
@@ -626,29 +1015,15 @@ tiny_value *tiny_get_array_element(const tiny_value *v, size_t index)
   return &v->u.a.e[index];
 }
 
-size_t tiny_get_object_size(const tiny_value *v)
-{
-  assert(v != NULL && v->type == TINY_OBJECT);
-  return v->u.o.size;
-}
-
-const char *tiny_get_object_key(const tiny_value *v, size_t index)
-{
-  assert(v != NULL && v->type == TINY_OBJECT);
-  assert(index < v->u.o.size);
-  return v->u.o.m[index].k;
-}
-
-size_t tiny_get_object_key_length(const tiny_value *v, size_t index)
-{
-  assert(v != NULL && v->type == TINY_OBJECT);
-  assert(index < v->u.o.size);
-  return v->u.o.m[index].klen;
-}
-
 tiny_value *tiny_get_object_value(const tiny_value *v, size_t index)
 {
   assert(v != NULL && v->type == TINY_OBJECT);
   assert(index < v->u.o.size);
   return &v->u.o.m[index].v;
+}
+
+void tiny_erase_array_element(tiny_value *v, size_t index, size_t count)
+{
+  assert(v != NULL && v->type == TINY_ARRAY && index + count <= v->u.a.size);
+  /* \todo */
 }
